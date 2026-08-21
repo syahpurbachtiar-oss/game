@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Bear Adventure 3D</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    overflow: hidden; background: #7ec8e3;
+    font-family: 'Segoe UI', Tahoma, sans-serif; touch-action: none;
+    -webkit-user-select: none; user-select: none;
+  }
+  canvas { display: block; }
+
+  #ui {
+    position: fixed; top: 0; left: 0; width: 100%;
+    padding: 14px 18px; box-sizing: border-box;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    pointer-events: none; z-index: 10;
+  }
+  .pill {
+    background: rgba(0,0,0,0.35); color: #fff; padding: 8px 16px;
+    border-radius: 999px; font-weight: 600; font-size: 16px;
+    backdrop-filter: blur(4px); box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  }
+  #coinCounter::before { content: "🌟 "; }
+  #timer::before { content: "⏱ "; }
+
+  #hint {
+    position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+    color: #fff; background: rgba(0,0,0,0.3); padding: 6px 14px; border-radius: 10px;
+    font-size: 13px; z-index: 10; pointer-events: none; transition: opacity 0.6s;
+  }
+
+  #startScreen, #winScreen {
+    position: fixed; inset: 0; z-index: 100;
+    background: radial-gradient(circle at 50% 30%, #ffe9b3, #f7b955 60%, #d98c3f);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; color: #4a2c10; padding: 20px; box-sizing: border-box;
+  }
+  #winScreen { display: none; }
+  #startScreen h1, #winScreen h1 {
+    font-size: clamp(28px, 8vw, 48px); margin: 0 0 8px; text-shadow: 2px 2px 0 #ffffffaa;
+  }
+  #startScreen p, #winScreen p { font-size: clamp(14px, 4vw, 18px); max-width: 480px; line-height: 1.5; margin: 6px 0 20px; }
+  .btn {
+    background: #3f8f3f; color: #fff; border: none; padding: 14px 36px;
+    font-size: 20px; font-weight: 700; border-radius: 999px; cursor: pointer;
+    box-shadow: 0 4px 0 #2c672c; transition: transform 0.1s;
+  }
+  .btn:active { transform: translateY(3px); box-shadow: 0 1px 0 #2c672c; }
+  .emoji-row { font-size: 40px; margin-bottom: 10px; }
+
+  /* Touch controls */
+  #touchControls { position: fixed; inset: 0; z-index: 20; pointer-events: none; display: none; }
+  #joyBase {
+    position: absolute; left: 30px; bottom: 30px; width: 130px; height: 130px;
+    border-radius: 50%; background: rgba(255,255,255,0.18); border: 2px solid rgba(255,255,255,0.4);
+    pointer-events: auto;
+  }
+  #joyStick {
+    position: absolute; left: 65px; top: 65px; width: 60px; height: 60px;
+    margin-left: -30px; margin-top: -30px; border-radius: 50%;
+    background: rgba(255,255,255,0.55); border: 2px solid rgba(255,255,255,0.7);
+  }
+  #jumpBtn {
+    position: absolute; right: 30px; bottom: 40px; width: 90px; height: 90px;
+    border-radius: 50%; background: rgba(255,200,60,0.65); border: 2px solid rgba(255,255,255,0.7);
+    color: #4a2c10; font-weight: 800; font-size: 15px; display: flex; align-items: center; justify-content: center;
+    pointer-events: auto;
+  }
+  #jumpBtn:active, #joyBase.active { filter: brightness(1.2); }
+</style>
+</head>
+<body>
+
+<div id="startScreen">
+  <div class="emoji-row">🐻🎈</div>
+  <h1>Bear Adventure 3D</h1>
+  <p>Kumpulkan semua bintang ⭐ dan jelajahi pulau-pulau melayang!<br>
+  <b>PC:</b> WASD/Panah untuk jalan, Spasi untuk lompat.<br>
+  <b>HP:</b> Pakai joystick kiri & tombol lompat kanan bawah.</p>
+  <button class="btn" id="startBtn">Mulai Main ▶</button>
+</div>
+
+<div id="winScreen">
+  <div class="emoji-row">🏆🐻</div>
+  <h1>Kamu Menang!</h1>
+  <p id="winStats"></p>
+  <button class="btn" id="restartBtn">Main Lagi</button>
+</div>
+
+<div id="ui">
+  <div class="pill" id="coinCounter">0 / 0</div>
+  <div class="pill" id="timer">0.0s</div>
+</div>
+<div id="hint">Kumpulkan semua bintang untuk menang!</div>
+
+<div id="touchControls">
+  <div id="joyBase"><div id="joyStick"></div></div>
+  <div id="jumpBtn">LOMPAT</div>
+</div>
+
+<script type="module">
+import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
+
+/* ---------------------------------------------------------------
+   BASIC SETUP
+--------------------------------------------------------------- */
+const isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+
+const scene = new THREE.Scene();
+const skyColor = new THREE.Color(0x9fd8f0);
+scene.background = skyColor;
+scene.fog = new THREE.Fog(skyColor.getHex(), 30, 95);
+
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 300);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, isTouch ? 1.6 : 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = !isTouch; // keep mobile buttery smooth
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+/* ---------------------------------------------------------------
+   LIGHTING
+--------------------------------------------------------------- */
+const hemi = new THREE.HemisphereLight(0xffffff, 0x6b8f4e, 0.9);
+scene.add(hemi);
+
+const sun = new THREE.DirectionalLight(0xfff3d6, 1.1);
+sun.position.set(20, 30, 10);
+sun.castShadow = !isTouch;
+if (sun.castShadow) {
+  sun.shadow.mapSize.set(1024, 1024);
+  sun.shadow.camera.left = -35;
+  sun.shadow.camera.right = 35;
+  sun.shadow.camera.top = 35;
+  sun.shadow.camera.bottom = -35;
+  sun.shadow.camera.far = 80;
+  sun.shadow.bias = -0.0025;
+}
+scene.add(sun);
+
+/* ---------------------------------------------------------------
+   WORLD: ground, platforms, decorations
+--------------------------------------------------------------- */
+const platforms = []; // {mesh, x,y,z, sx,sy,sz}
+
+function addPlatform(x, y, z, sx, sy, sz, color = 0xd9a25c) {
+  const geo = new THREE.BoxGeometry(sx, sy, sz);
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.9 });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(x, y, z);
+  mesh.receiveShadow = true;
+  mesh.castShadow = true;
+  scene.add(mesh);
+  // grassy top cap for flavor
+  const capGeo = new THREE.BoxGeometry(sx * 1.001, 0.25, sz * 1.001);
+  const capMat = new THREE.MeshStandardMaterial({ color: 0x6fae4a, roughness: 1 });
+  const cap = new THREE.Mesh(capGeo, capMat);
+  cap.position.set(x, y + sy/2 + 0.12, z);
+  cap.receiveShadow = true;
+  scene.add(cap);
+
+  const top = y + sy / 2;
+  platforms.push({
+    minX: x - sx/2 - 0.35, maxX: x + sx/2 + 0.35,
+    minZ: z - sz/2 - 0.35, maxZ: z + sz/2 + 0.35,
+    top
+  });
+}
+
+// Ground
+addPlatform(0, -0.5, 0, 60, 1, 60, 0xdcb374);
+
+// Winding ascending path of floating islands
+const islands = [
+  [0, 2, -9, 5, 1, 5],
+  [6, 3.4, -15, 4, 1, 4],
+  [0, 4.8, -21, 4, 1, 4],
+  [-7, 6.2, -26, 4, 1, 4],
+  [0, 7.8, -32, 6, 1, 6],
+  [8, 9.2, -37, 3.5, 1, 3.5],
+  [14.5, 10.6, -33, 3.5, 1, 3.5],
+  [14.5, 12, -25, 3.5, 1, 3.5],
+  [8, 13.4, -19, 3.5, 1, 3.5],
+  [0, 15, -13, 4.5, 1, 4.5],
+  [-8, 16.4, -7, 4.5, 1, 4.5],
+  [-8, 18, 1, 6, 1, 6],
+];
+islands.forEach(p => addPlatform(...p));
+
+// Trophy marker at the final island
+{
+  const [fx, fy, fz] = islands[islands.length - 1];
+  const poleGeo = new THREE.CylinderGeometry(0.12, 0.12, 4, 8);
+  const poleMat = new THREE.MeshStandardMaterial({ color: 0x8a5a2b });
+  const pole = new THREE.Mesh(poleGeo, poleMat);
+  pole.position.set(fx, fy + 0.5 + 2, fz);
+  pole.castShadow = true;
+  scene.add(pole);
+  const flagGeo = new THREE.ConeGeometry(0.9, 1.4, 4);
+  const flagMat = new THREE.MeshStandardMaterial({ color: 0xe0533d });
+  const flag = new THREE.Mesh(flagGeo, flagMat);
+  flag.rotation.z = Math.PI / 2;
+  flag.position.set(fx + 0.8, fy + 0.5 + 3.4, fz);
+  flag.castShadow = true;
+  scene.add(flag);
+}
+
+// Decorative trees scattered on ground (avoid island path center)
+function makeTree(x, z, scale = 1) {
+  const g = new THREE.Group();
+  const trunk = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.25, 0.32, 1.6, 7),
+    new THREE.MeshStandardMaterial({ color: 0x7a5230 })
+  );
+  trunk.position.y = 0.8;
+  trunk.castShadow = true;
+  g.add(trunk);
+  const leafColors = [0x4c9a4c, 0x59ab5a, 0x3f8a4a];
+  for (let i = 0; i < 3; i++) {
+    const leaf = new THREE.Mesh(
+      new THREE.ConeGeometry(1.1 - i*0.18, 1.3, 8),
+      new THREE.MeshStandardMaterial({ color: leafColors[i % leafColors.length] })
+    );
+    leaf.position.y = 1.6 + i * 0.9;
+    leaf.castShadow = true;
+    g.add(leaf);
+  }
+  g.position.set(x, 0, z);
+  g.scale.setScalar(scale);
+  scene.add(g);
+}
+const treeSpots = [
+  [10,10],[-10,8],[16,-2],[-14,-4],[20,6],[-18,2],[24,-10],[-22,-8],
+  [12,20],[-12,18],[6,26],[-6,24],[26,16],[-26,12]
+];
+treeSpots.forEach(([x,z]) => makeTree(x, z, 0.9 + Math.random()*0.5));
+
+// Rocks for flavor
+function makeRock(x,z,s=1){
+  const rock = new THREE.Mesh(
+    new THREE.IcosahedronGeometry(0.6*s, 0),
+    new THREE.MeshStandardMaterial({ color: 0x8c8c8c, flatShading: true })
+  );
+  rock.position.set(x, 0.3*s, z);
+  rock.rotation.set(Math.random(), Math.random(), Math.random());
+  rock.castShadow = true;
+  scene.add(rock);
+}
+for (let i=0;i<10;i++){
+  makeRock((Math.random()-0.5)*50, (Math.random()-0.5)*50, 0.7+Math.random());
+}
+
+/* ---------------------------------------------------------------
+   COINS (collectibles)
+--------------------------------------------------------------- */
+const coinGeo = new THREE.CylinderGeometry(0.45, 0.45, 0.14, 16);
+const coinMat = new THREE.MeshStandardMaterial({ color: 0xffd451, emissive: 0x664400, emissiveIntensity: 0.25, metalness: 0.4, roughness: 0.35 });
+
+const coins = [];
+function addCoin(x, y, z) {
+  const mesh = new THREE.Mesh(coinGeo, coinMat);
+  mesh.position.set(x, y, z);
+  mesh.rotation.x = Math.PI / 2;
+  mesh.castShadow = true;
+  scene.add(mesh);
+  coins.push({ mesh, collected: false, baseY: y, phase: Math.random() * Math.PI * 2 });
+}
+
+// Place coins along the path (slightly above each island) + a few bonus mid-air ones
+islands.forEach(([x,y,z]) => addCoin(x, y + 1.6, z));
+const bonusCoins = [
+  [3, 3.0, -12], [-3, 5.8, -18], [3.5, 8.6, -29],
+  [11, 10.2, -35], [17.5, 11.5, -29], [11, 14.6, -16],
+  [-4, 16.8, -10]
+];
+bonusCoins.forEach(([x,y,z]) => addCoin(x, y, z));
+
+const totalCoins = coins.length;
+document.getElementById('coinCounter').textContent = `0 / ${totalCoins}`;
+
+/* ---------------------------------------------------------------
+   BEAR CHARACTER
+--------------------------------------------------------------- */
+function buildBear() {
+  const bear = new THREE.Group();
+  const furMat = new THREE.MeshStandardMaterial({ color: 0x8a5a34, roughness: 0.8 });
+  const tanMat = new THREE.MeshStandardMaterial({ color: 0xd9a566, roughness: 0.8 });
+  const darkMat = new THREE.MeshStandardMaterial({ color: 0x2b1c12, roughness: 0.6 });
+
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.62, 16, 12), furMat);
+  body.scale.set(1, 0.92, 1.05);
+  body.position.y = 0.72;
+  body.castShadow = true;
+  bear.add(body);
+
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.42, 16, 12), furMat);
+  head.position.set(0, 1.28, 0.18);
+  head.castShadow = true;
+  bear.add(head);
+
+  const snout = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 10), tanMat);
+  snout.scale.set(1, 0.8, 0.9);
+  snout.position.set(0, 1.18, 0.52);
+  snout.castShadow = true;
+  bear.add(snout);
+
+  const nose = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 8), darkMat);
+  nose.position.set(0, 1.22, 0.72);
+  bear.add(nose);
+
+  [[-0.13, 1.32, 0.5],[0.13, 1.32, 0.5]].forEach(([x,y,z]) => {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 8), darkMat);
+    eye.position.set(x,y,z);
+    bear.add(eye);
+  });
+
+  [[-0.3, 1.62, 0.05],[0.3, 1.62, 0.05]].forEach(([x,y,z]) => {
+    const ear = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 10), furMat);
+    ear.position.set(x,y,z);
+    ear.castShadow = true;
+    bear.add(ear);
+  });
+
+  const legs = [];
+  [[-0.32,-0.3],[0.32,-0.3],[-0.32,0.3],[0.32,0.3]].forEach(([x,z]) => {
+    const leg = new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 0.24, 4, 8), furMat);
+    leg.position.set(x, 0.28, z);
+    leg.castShadow = true;
+    bear.add(leg);
+    legs.push(leg);
+  });
+
+  bear.userData.legs = legs;
+  bear.userData.head = head;
+  bear.userData.body = body;
+  return bear;
+}
+
+const bear = buildBear();
+scene.add(bear);
+
+/* ---------------------------------------------------------------
+   PLAYER STATE / PHYSICS
+--------------------------------------------------------------- */
+const START_POS = new THREE.Vector3(0, 0.02, 6);
+const player = {
+  pos: START_POS.clone(),
+  vel: new THREE.Vector3(0, 0, 0),
+  yaw: Math.PI,          // facing direction
+  grounded: false,
+  jumpsLeft: 2,
+  radius: 0.5
+};
+
+const GRAVITY = 26;
+const JUMP_FORCE = 10.8;
+const MOVE_SPEED = 7.2;
+const TURN_RATE = 10;
+
+let cameraYaw = player.yaw;
+const CAM_DIST = 6.5;
+const CAM_HEIGHT = 3.0;
+const CAM_LOOK_HEIGHT = 1.4;
+
+/* ---------------------------------------------------------------
+   INPUT: keyboard + touch joystick + jump button
+--------------------------------------------------------------- */
+const keys = {};
+window.addEventListener('keydown', e => { keys[e.code] = true; if (e.code === 'Space') e.preventDefault(); });
+window.addEventListener('keyup', e => { keys[e.code] = false; });
+
+let jumpQueued = false;
+
+const inputVec = { x: 0, y: 0 }; // x = strafe, y = forward
+
+if (isTouch) {
+  document.getElementById('touchControls').style.display = 'block';
+}
+
+// Joystick logic
+const joyBase = document.getElementById('joyBase');
+const joyStick = document.getElementById('joyStick');
+let joyTouchId = null;
+const JOY_RADIUS = 50;
+
+function joyStart(e) {
+  const t = e.changedTouches ? e.changedTouches[0] : e;
+  joyTouchId = t.identifier ?? 'mouse';
+  joyBase.classList.add('active');
+  updateJoy(t);
+  e.preventDefault();
+}
+function updateJoy(t) {
+  const rect = joyBase.getBoundingClientRect();
+  const cx = rect.left + rect.width/2;
+  const cy = rect.top + rect.height/2;
+  let dx = t.clientX - cx;
+  let dy = t.clientY - cy;
+  const dist = Math.min(Math.hypot(dx, dy), JOY_RADIUS);
+  const angle = Math.atan2(dy, dx);
+  dx = Math.cos(angle) * dist;
+  dy = Math.sin(angle) * dist;
+  joyStick.style.left = (65 + dx) + 'px';
+  joyStick.style.top = (65 + dy) + 'px';
+  inputVec.x = dx / JOY_RADIUS;
+  inputVec.y = -dy / JOY_RADIUS;
+}
+function joyEnd(e) {
+  joyTouchId = null;
+  joyBase.classList.remove('active');
+  joyStick.style.left = '65px';
+  joyStick.style.top = '65px';
+  inputVec.x = 0; inputVec.y = 0;
+}
+joyBase.addEventListener('touchstart', joyStart, { passive: false });
+joyBase.addEventListener('touchmove', e => {
+  const t = [...e.changedTouches].find(t => t.identifier === joyTouchId);
+  if (t) updateJoy(t);
+  e.preventDefault();
+}, { passive: false });
+joyBase.addEventListener('touchend', joyEnd);
+joyBase.addEventListener('touchcancel', joyEnd);
+
+const jumpBtn = document.getElementById('jumpBtn');
+jumpBtn.addEventListener('touchstart', e => { jumpQueued = true; e.preventDefault(); }, { passive: false });
+
+/* ---------------------------------------------------------------
+   AUDIO (tiny beeps, no external assets)
+--------------------------------------------------------------- */
+let actx = null;
+function beep(freq, dur, type = 'sine', vol = 0.18) {
+  try {
+    if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = actx.createOscillator();
+    const gain = actx.createGain();
+    osc.type = type;
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(vol, actx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur);
+    osc.connect(gain).connect(actx.destination);
+    osc.start();
+    osc.stop(actx.currentTime + dur);
+  } catch (e) {}
+}
+
+/* ---------------------------------------------------------------
+   GAME FLOW
+--------------------------------------------------------------- */
+let started = false;
+let won = false;
+let elapsed = 0;
+let collectedCount = 0;
+
+document.getElementById('startBtn').addEventListener('click', () => {
+  document.getElementById('startScreen').style.display = 'none';
+  started = true;
+  if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){} }
+  setTimeout(() => { document.getElementById('hint').style.opacity = '0'; }, 4000);
+});
+document.getElementById('restartBtn').addEventListener('click', () => window.location.reload());
+
+/* ---------------------------------------------------------------
+   MAIN LOOP
+--------------------------------------------------------------- */
+const clock = new THREE.Clock();
+
+function resolveGround(feetY, velY) {
+  let bestTop = -Infinity;
+  let onSomething = false;
+  for (const p of platforms) {
+    if (player.pos.x >= p.minX && player.pos.x <= p.maxX && player.pos.z >= p.minZ && player.pos.z <= p.maxZ) {
+      if (velY <= 0 && feetY <= p.top + 0.05 && feetY >= p.top - 1.2) {
+        if (p.top > bestTop) { bestTop = p.top; onSomething = true; }
+      }
+    }
+  }
+  return onSomething ? bestTop : null;
+}
+
+function updatePlayer(dt) {
+  // Camera-relative movement
+  const forward = new THREE.Vector3(Math.sin(cameraYaw), 0, Math.cos(cameraYaw));
+  const right = new THREE.Vector3(Math.sin(cameraYaw + Math.PI/2), 0, Math.cos(cameraYaw + Math.PI/2));
+
+  let mx = 0, mz = 0;
+  if (isTouch) {
+    mx = inputVec.x; mz = inputVec.y;
+  } else {
+    if (keys['KeyW'] || keys['ArrowUp']) mz += 1;
+    if (keys['KeyS'] || keys['ArrowDown']) mz -= 1;
+    if (keys['KeyA'] || keys['ArrowLeft']) mx -= 1;
+    if (keys['KeyD'] || keys['ArrowRight']) mx += 1;
+  }
+
+  const moveDir = new THREE.Vector3();
+  moveDir.addScaledVector(forward, mz);
+  moveDir.addScaledVector(right, mx);
+  const moving = moveDir.lengthSq() > 0.0001;
+  if (moving) {
+    moveDir.normalize();
+    player.pos.x += moveDir.x * MOVE_SPEED * dt;
+    player.pos.z += moveDir.z * MOVE_SPEED * dt;
+    const targetYaw = Math.atan2(moveDir.x, moveDir.z);
+    let diff = targetYaw - player.yaw;
+    diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+    player.yaw += diff * Math.min(1, TURN_RATE * dt);
+  }
+
+  // Jump
+  const wantsJump = jumpQueued || keys['Space'];
+  if (wantsJump && player.jumpsLeft > 0) {
+    player.vel.y = JUMP_FORCE;
+    player.jumpsLeft -= 1;
+    player.grounded = false;
+    beep(520, 0.12, 'square', 0.12);
+  }
+  jumpQueued = false;
+
+  // Gravity + vertical motion
+  player.vel.y -= GRAVITY * dt;
+  player.pos.y += player.vel.y * dt;
+
+  const groundTop = resolveGround(player.pos.y, player.vel.y);
+  if (groundTop !== null) {
+    player.pos.y = groundTop;
+    player.vel.y = 0;
+    if (!player.grounded) { player.grounded = true; player.jumpsLeft = 2; }
+  } else {
+    player.grounded = false;
+  }
+
+  // Fell off the world -> respawn
+  if (player.pos.y < -20) {
+    player.pos.copy(START_POS);
+    player.vel.set(0,0,0);
+    player.jumpsLeft = 2;
+  }
+
+  // Update bear mesh
+  bear.position.copy(player.pos);
+  bear.rotation.y = player.yaw;
+
+  // simple run animation (leg swing) + idle bob
+  const t = clock.elapsedTime;
+  const speedFactor = moving ? 1 : 0;
+  bear.userData.legs.forEach((leg, i) => {
+    const dir = (i % 2 === 0) ? 1 : -1;
+    leg.rotation.x = Math.sin(t * 10 + (i < 2 ? 0 : Math.PI)) * 0.5 * speedFactor * dir * -1;
+  });
+  bear.userData.body.position.y = 0.72 + (speedFactor ? Math.abs(Math.sin(t*10))*0.04 : Math.sin(t*2)*0.015);
+  bear.userData.head.position.y = 1.28 + (speedFactor ? Math.abs(Math.sin(t*10+0.3))*0.03 : Math.sin(t*2)*0.01);
+
+  // Camera yaw eases toward player's facing direction (chase cam)
+  let camDiff = player.yaw - cameraYaw;
+  camDiff = Math.atan2(Math.sin(camDiff), Math.cos(camDiff));
+  cameraYaw += camDiff * Math.min(1, 3.2 * dt);
+
+  const camOffset = new THREE.Vector3(Math.sin(cameraYaw), 0, Math.cos(cameraYaw)).multiplyScalar(-CAM_DIST);
+  const desiredCamPos = new THREE.Vector3(
+    player.pos.x + camOffset.x,
+    player.pos.y + CAM_HEIGHT,
+    player.pos.z + camOffset.z
+  );
+  camera.position.lerp(desiredCamPos, Math.min(1, 6 * dt));
+  camera.lookAt(player.pos.x, player.pos.y + CAM_LOOK_HEIGHT, player.pos.z);
+}
+
+function updateCoins(dt) {
+  const t = clock.elapsedTime;
+  for (const c of coins) {
+    if (c.collected) continue;
+    c.mesh.rotation.z += dt * 2.4;
+    c.mesh.position.y = c.baseY + Math.sin(t * 2 + c.phase) * 0.18;
+    const dx = c.mesh.position.x - player.pos.x;
+    const dz = c.mesh.position.z - player.pos.z;
+    const dy = c.mesh.position.y - (player.pos.y + 0.8);
+    if (dx*dx + dy*dy + dz*dz < 1.5*1.5) {
+      c.collected = true;
+      c.mesh.visible = false;
+      collectedCount++;
+      document.getElementById('coinCounter').textContent = `${collectedCount} / ${totalCoins}`;
+      beep(880, 0.15, 'triangle', 0.15);
+      if (collectedCount >= totalCoins && !won) {
+        won = true;
+        setTimeout(() => {
+          document.getElementById('winStats').textContent =
+            `Kamu mengumpulkan semua ${totalCoins} bintang dalam ${elapsed.toFixed(1)} detik!`;
+          document.getElementById('winScreen').style.display = 'flex';
+        }, 400);
+      }
+    }
+  }
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  if (started && !won) {
+    elapsed += dt;
+    document.getElementById('timer').textContent = elapsed.toFixed(1) + 's';
+    updatePlayer(dt);
+    updateCoins(dt);
+  } else if (started && won) {
+    // let bear idle-bob even after winning
+    bear.userData.body.position.y = 0.72 + Math.sin(clock.elapsedTime*2)*0.015;
+  }
+  renderer.render(scene, camera);
+}
+
+// initial camera position before start
+camera.position.set(0, 3.2, 12.5);
+camera.lookAt(0, 1.4, 6);
+
+animate();
+</script>
+</body>
+</html>
