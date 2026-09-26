@@ -1,7 +1,7 @@
 package com.bokir.wake;
 
 import android.Manifest;
-import android.content.Intent;
+import android.content.*;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.widget.Button;
@@ -14,6 +14,13 @@ import androidx.core.content.ContextCompat;
 public class MainActivity extends AppCompatActivity {
     private static final int REQ_AUDIO = 1001;
     private TextView statusText;
+
+    private final BroadcastReceiver statusReceiver = new BroadcastReceiver() {
+        @Override public void onReceive(Context context, Intent intent) {
+            String msg = intent.getStringExtra("msg");
+            if (msg != null) statusText.setText(msg);
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -42,6 +49,16 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    @Override protected void onStart() {
+        super.onStart();
+        registerReceiver(statusReceiver, new IntentFilter("com.bokir.wake.STATUS"));
+    }
+
+    @Override protected void onStop() {
+        try { unregisterReceiver(statusReceiver); } catch (Exception ignored) {}
+        super.onStop();
+    }
+
     private void ensureStarted() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
                 != PackageManager.PERMISSION_GRANTED) {
@@ -59,7 +76,7 @@ public class MainActivity extends AppCompatActivity {
         try {
             Intent i = new Intent(this, WakeService.class);
             ContextCompat.startForegroundService(this, i);
-            statusText.setText("Aktif — ucapkan: Halo Bokir");
+            statusText.setText("Menyiapkan mikrofon...");
         } catch (Exception e) {
             statusText.setText("Gagal mulai: " + e.getClass().getSimpleName());
         }
