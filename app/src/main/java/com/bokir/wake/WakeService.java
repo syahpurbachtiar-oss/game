@@ -194,7 +194,7 @@ public class WakeService extends Service {
                     cooldownUntil = System.currentTimeMillis() + 3500;
                     mode = Mode.QUESTION_WAIT;
                     filled = 0;
-                    updateNotification("Halo Bokir terdeteksi — silakan tanya");
+                    updateNotification("Halo Bokir terdeteksi — silakan tanya sekarang");
                 }
             }
 
@@ -388,6 +388,39 @@ public class WakeService extends Service {
             NotificationManager manager = getSystemService(NotificationManager.class);
             if (manager != null) manager.createNotificationChannel(c);
         }
+    }
+
+    @Override
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        return START_STICKY;
+    }
+
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        try {
+            boolean auto = getSharedPreferences("bokir", MODE_PRIVATE)
+                    .getBoolean("auto_start", false);
+            if (auto) {
+                Intent restart = new Intent(getApplicationContext(), WakeService.class);
+                PendingIntent pi = PendingIntent.getService(
+                        getApplicationContext(),
+                        77,
+                        restart,
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                                ? PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+                                : PendingIntent.FLAG_UPDATE_CURRENT
+                );
+                AlarmManager am = (AlarmManager) getSystemService(ALARM_SERVICE);
+                if (am != null) {
+                    am.set(
+                            AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                            SystemClock.elapsedRealtime() + 1500,
+                            pi
+                    );
+                }
+            }
+        } catch (Throwable ignored) {}
+        super.onTaskRemoved(rootIntent);
     }
 
     @Override
