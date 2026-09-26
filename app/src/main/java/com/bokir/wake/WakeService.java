@@ -30,6 +30,7 @@ public class WakeService extends Service {
     private NotificationManager nm;
     private PowerManager.WakeLock wakeLock;
     private TextToSpeech tts;
+    private ToneGenerator tone;
 
     private enum Mode { WAKE, QUESTION_WAIT, FOLLOWUP_WAIT }
     private volatile Mode mode = Mode.WAKE;
@@ -81,6 +82,8 @@ public class WakeService extends Service {
                 });
             }
         });
+
+        tone = new ToneGenerator(AudioManager.STREAM_MUSIC, 80);
 
         running = true;
         new Thread(this::listenLoop).start();
@@ -192,9 +195,16 @@ public class WakeService extends Service {
 
                 if (best >= 0.72f && System.currentTimeMillis() > cooldownUntil) {
                     cooldownUntil = System.currentTimeMillis() + 3500;
-                    mode = Mode.QUESTION_WAIT;
                     filled = 0;
-                    updateNotification("Halo Bokir terdeteksi — silakan tanya sekarang");
+                    busy = true;
+                    updateNotification("Halo Bokir terdeteksi");
+                    try {
+                        if (tone != null) tone.startTone(ToneGenerator.TONE_PROP_BEEP, 140);
+                    } catch (Throwable ignored) {}
+                    SystemClock.sleep(180);
+                    mode = Mode.QUESTION_WAIT;
+                    busy = false;
+                    updateNotification("Silakan tanya sekarang");
                 }
             }
 
@@ -431,6 +441,9 @@ public class WakeService extends Service {
                 tts.stop();
                 tts.shutdown();
             }
+        } catch (Throwable ignored) {}
+        try {
+            if (tone != null) tone.release();
         } catch (Throwable ignored) {}
         try {
             if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
