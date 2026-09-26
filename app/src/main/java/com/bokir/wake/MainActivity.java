@@ -24,29 +24,45 @@ public class MainActivity extends AppCompatActivity {
         Button startButton = findViewById(R.id.startButton);
         Button stopButton = findViewById(R.id.stopButton);
 
-        startButton.setOnClickListener(v -> {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
-                    != PackageManager.PERMISSION_GRANTED) {
-                ActivityCompat.requestPermissions(
-                        this,
-                        new String[]{Manifest.permission.RECORD_AUDIO},
-                        REQ_AUDIO
-                );
-            } else {
-                startWakeService();
-            }
-        });
-
+        startButton.setOnClickListener(v -> ensureStarted());
         stopButton.setOnClickListener(v -> {
             stopService(new Intent(this, WakeService.class));
             statusText.setText("Berhenti");
         });
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+                == PackageManager.PERMISSION_GRANTED) {
+            startWakeService();
+        } else {
+            ActivityCompat.requestPermissions(
+                    this,
+                    new String[]{Manifest.permission.RECORD_AUDIO},
+                    REQ_AUDIO
+            );
+        }
+    }
+
+    private void ensureStarted() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(
+                    this,
+                    new String[]{Manifest.permission.RECORD_AUDIO},
+                    REQ_AUDIO
+            );
+        } else {
+            startWakeService();
+        }
     }
 
     private void startWakeService() {
-        Intent i = new Intent(this, WakeService.class);
-        ContextCompat.startForegroundService(this, i);
-        statusText.setText("Aktif — ucapkan: Halo Bokir");
+        try {
+            Intent i = new Intent(this, WakeService.class);
+            ContextCompat.startForegroundService(this, i);
+            statusText.setText("Aktif — ucapkan: Halo Bokir");
+        } catch (Exception e) {
+            statusText.setText("Gagal mulai: " + e.getClass().getSimpleName());
+        }
     }
 
     @Override
