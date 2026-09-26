@@ -9,10 +9,6 @@ import android.os.Build;
 import android.os.IBinder;
 import androidx.core.app.NotificationCompat;
 
-import java.io.ByteArrayOutputStream;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-
 public class WakeService extends Service {
     private static final int SAMPLE_RATE = 16000;
     private static final String CHANNEL_ID = "bokir_local";
@@ -26,7 +22,7 @@ public class WakeService extends Service {
         createChannel();
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("Bokir Wake aktif")
-                .setContentText("Menunggu ucapan pemicu")
+                .setContentText("Menunggu: Halo Bokir")
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .setOngoing(true)
                 .build();
@@ -72,7 +68,7 @@ public class WakeService extends Service {
             int speechPos = 0;
             boolean inSpeech = false;
             int silentFrames = 0;
-            float noise = 300f;
+            float noise = 250f;
             long cooldownUntil = 0;
 
             while (running) {
@@ -84,8 +80,8 @@ public class WakeService extends Service {
                 float rms = (float)Math.sqrt(sum / n);
 
                 if (!inSpeech) {
-                    noise = noise * 0.98f + rms * 0.02f;
-                    float gate = Math.max(700f, noise * 2.2f);
+                    noise = noise * 0.985f + rms * 0.015f;
+                    float gate = Math.max(500f, noise * 1.7f);
                     if (rms > gate) {
                         inSpeech = true;
                         speechPos = 0;
@@ -98,18 +94,18 @@ public class WakeService extends Service {
                     System.arraycopy(frame, 0, speech, speechPos, copy);
                     speechPos += copy;
 
-                    float gate = Math.max(500f, noise * 1.5f);
+                    float gate = Math.max(400f, noise * 1.25f);
                     if (rms < gate) silentFrames++;
                     else silentFrames = 0;
 
-                    boolean finished = silentFrames >= 18 || speechPos >= speech.length;
+                    boolean finished = silentFrames >= 12 || speechPos >= speech.length;
                     if (finished) {
-                        if (speechPos > SAMPLE_RATE / 3 && System.currentTimeMillis() > cooldownUntil) {
+                        if (speechPos > SAMPLE_RATE / 4 && System.currentTimeMillis() > cooldownUntil) {
                             float[] f = FeatureExtractor.extract(speech, speechPos);
                             float score = FeatureExtractor.cosine(template, f);
-                            if (score >= 0.90f) {
+                            if (score >= 0.78f) {
                                 cooldownUntil = System.currentTimeMillis() + 5000;
-                                launchAssistant();
+                                openChatGPT();
                             }
                         }
                         inSpeech = false;
@@ -118,8 +114,6 @@ public class WakeService extends Service {
                     }
                 }
             }
-        } catch (SecurityException e) {
-            stopSelf();
         } catch (Throwable t) {
             stopSelf();
         } finally {
@@ -132,24 +126,14 @@ public class WakeService extends Service {
         }
     }
 
-    private void launchAssistant() {
-        boolean started = false;
+    private void openChatGPT() {
         try {
-            Intent assistant = new Intent(Intent.ACTION_ASSIST);
-            assistant.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(assistant);
-            started = true;
+            Intent i = getPackageManager().getLaunchIntentForPackage("com.openai.chatgpt");
+            if (i != null) {
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(i);
+            }
         } catch (Throwable ignored) {}
-
-        if (!started) {
-            try {
-                Intent i = getPackageManager().getLaunchIntentForPackage("com.openai.chatgpt");
-                if (i != null) {
-                    i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    startActivity(i);
-                }
-            } catch (Throwable ignored) {}
-        }
     }
 
     private void createChannel() {
