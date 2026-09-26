@@ -19,20 +19,35 @@ public class WakeService extends Service {
     public void onCreate() {
         super.onCreate();
         createChannel();
+
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("Bokir Wake aktif")
                 .setContentText("Menunggu: Halo Bokir")
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .setOngoing(true)
                 .build();
+
         startForeground(1, notification);
-        startListening();
+        new android.os.Handler(getMainLooper()).postDelayed(this::safeStartListening, 300);
+    }
+
+    private void safeStartListening() {
+        try {
+            startListening();
+        } catch (Throwable t) {
+            scheduleRestart(1500);
+        }
     }
 
     private void startListening() {
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            stopSelf();
+            scheduleRestart(2000);
             return;
+        }
+
+        if (recognizer != null) {
+            try { recognizer.destroy(); } catch (Throwable ignored) {}
+            recognizer = null;
         }
 
         recognizer = SpeechRecognizer.createSpeechRecognizer(this);
@@ -42,12 +57,12 @@ public class WakeService extends Service {
             @Override public void onRmsChanged(float rmsdB) {}
             @Override public void onBufferReceived(byte[] buffer) {}
             @Override public void onEndOfSpeech() {}
-            @Override public void onError(int error) { restart(); }
+            @Override public void onError(int error) { scheduleRestart(800); }
 
             @Override
             public void onResults(android.os.Bundle results) {
                 checkResults(results);
-                restart();
+                scheduleRestart(500);
             }
 
             @Override public void onPartialResults(android.os.Bundle partialResults) {
@@ -63,16 +78,18 @@ public class WakeService extends Service {
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "id-ID");
         intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
         intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3);
+        intent.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, getPackageName());
         recognizer.startListening(intent);
     }
 
     private void checkResults(android.os.Bundle bundle) {
         ArrayList<String> list = bundle.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
         if (list == null || launching) return;
+
         for (String s : list) {
             String t = s.toLowerCase(Locale.ROOT).trim();
-            if (t.contains("halo bokir") || t.contains("hallo bokir") ||
-                    t.contains("halo bogir") || t.contains("halo bukir")) {
+            if (t.contains("halo bokir") || t.contains("hallo bokir")
+                    || t.contains("halo bogir") || t.contains("halo bukir")) {
                 launching = true;
                 launchAssistant();
                 new android.os.Handler(getMainLooper()).postDelayed(() -> launching = false, 3000);
@@ -81,14 +98,8 @@ public class WakeService extends Service {
         }
     }
 
-    private void restart() {
-        try {
-            if (recognizer != null) {
-                recognizer.destroy();
-                recognizer = null;
-            }
-        } catch (Exception ignored) {}
-        new android.os.Handler(getMainLooper()).postDelayed(this::startListening, 500);
+    private void scheduleRestart(long delayMs) {
+        new android.os.Handler(getMainLooper()).postDelayed(this::safeStartListening, delayMs);
     }
 
     private void launchAssistant() {
@@ -96,24 +107,27 @@ public class WakeService extends Service {
             Intent assistant = new Intent(Intent.ACTION_ASSIST);
             assistant.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(assistant);
-        } catch (Exception e) {
+        } catch (Throwable e) {
             try {
                 Intent i = getPackageManager().getLaunchIntentForPackage("com.openai.chatgpt");
                 if (i != null) {
                     i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                     startActivity(i);
                 }
-            } catch (Exception ignored) {}
+            } catch (Throwable ignored) {}
         }
     }
 
     private void createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel =
-                    new NotificationChannel(CHANNEL_ID, "Bokir Wake",
-                            NotificationManager.IMPORTANCE_LOW);
+                    new NotificationChannel(
+                            CHANNEL_ID,
+                            "Bokir Wake",
+                            NotificationManager.IMPORTANCE_LOW
+                    );
             NotificationManager nm = getSystemService(NotificationManager.class);
-            nm.createNotificationChannel(channel);
+            if (nm != null) nm.createNotificationChannel(channel);
         }
     }
 
@@ -121,7 +135,7 @@ public class WakeService extends Service {
     public void onDestroy() {
         try {
             if (recognizer != null) recognizer.destroy();
-        } catch (Exception ignored) {}
+        } catch (Throwable ignored) {}
         super.onDestroy();
     }
 
