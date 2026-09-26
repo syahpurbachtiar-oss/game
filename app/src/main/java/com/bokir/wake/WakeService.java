@@ -2,11 +2,18 @@ package com.bokir.wake;
 
 import android.app.*;
 import android.content.*;
+import android.graphics.PixelFormat;
 import android.media.AudioFormat;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
 import android.os.Build;
 import android.os.IBinder;
+import android.provider.Settings;
+import android.view.Gravity;
+import android.view.View;
+import android.view.WindowManager;
+import android.widget.TextView;
+
 import androidx.core.app.NotificationCompat;
 
 public class WakeService extends Service {
@@ -16,6 +23,8 @@ public class WakeService extends Service {
     private AudioRecord recorder;
     private float[] template;
     private NotificationManager nm;
+    private WindowManager windowManager;
+    private View overlayView;
 
     @Override
     public void onCreate() {
@@ -131,7 +140,7 @@ public class WakeService extends Service {
                 if (best >= 0.72f && System.currentTimeMillis() > cooldownUntil) {
                     cooldownUntil = System.currentTimeMillis() + 6000;
                     updateNotification("Halo Bokir terdeteksi");
-                    openChatGPT();
+                    showOverlayAndOpenChatGPT();
                 }
             }
         } catch (SecurityException e) {
@@ -150,14 +159,83 @@ public class WakeService extends Service {
         }
     }
 
+    private void showOverlayAndOpenChatGPT() {
+        new android.os.Handler(getMainLooper()).post(() -> {
+            try {
+                if (!Settings.canDrawOverlays(this)) {
+                    updateNotification("Izin tampil di atas aplikasi lain belum aktif");
+                    return;
+                }
+
+                if (windowManager == null) {
+                    windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
+                }
+
+                if (overlayView != null) {
+                    try { windowManager.removeView(overlayView); } catch (Throwable ignored) {}
+                    overlayView = null;
+                }
+
+                TextView bubble = new TextView(this);
+                bubble.setText("Bokir");
+                bubble.setTextSize(14f);
+                bubble.setGravity(Gravity.CENTER);
+                bubble.setPadding(18, 8, 18, 8);
+                bubble.setBackgroundColor(0xCC000000);
+                bubble.setTextColor(0xFFFFFFFF);
+                overlayView = bubble;
+
+                int type = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                        ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                        : WindowManager.LayoutParams.TYPE_PHONE;
+
+                WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+                        WindowManager.LayoutParams.WRAP_CONTENT,
+                        WindowManager.LayoutParams.WRAP_CONTENT,
+                        type,
+                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                                | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                                | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                        PixelFormat.TRANSLUCENT
+                );
+                lp.gravity = Gravity.TOP | Gravity.END;
+                lp.x = 24;
+                lp.y = 120;
+
+                windowManager.addView(overlayView, lp);
+
+                new android.os.Handler(getMainLooper()).postDelayed(() -> {
+                    openChatGPT();
+                    new android.os.Handler(getMainLooper()).postDelayed(this::removeOverlay, 1200);
+                }, 250);
+
+            } catch (Throwable t) {
+                updateNotification("Overlay gagal: " + t.getClass().getSimpleName());
+            }
+        });
+    }
+
     private void openChatGPT() {
         try {
             Intent i = getPackageManager().getLaunchIntentForPackage("com.openai.chatgpt");
             if (i != null) {
-                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                        | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                        | Intent.FLAG_ACTIVITY_SINGLE_TOP);
                 startActivity(i);
             }
+        } catch (Throwable t) {
+            updateNotification("Gagal membuka ChatGPT");
+        }
+    }
+
+    private void removeOverlay() {
+        try {
+            if (windowManager != null && overlayView != null) {
+                windowManager.removeView(overlayView);
+            }
         } catch (Throwable ignored) {}
+        overlayView = null;
     }
 
     private void createChannel() {
@@ -175,6 +253,7 @@ public class WakeService extends Service {
     @Override
     public void onDestroy() {
         running = false;
+        removeOverlay();
         super.onDestroy();
     }
 
