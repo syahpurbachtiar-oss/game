@@ -7,7 +7,10 @@ import android.content.pm.PackageManager;
 import android.media.AudioFormat;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.widget.Button;
 import android.widget.TextView;
 
@@ -41,6 +44,15 @@ public class MainActivity extends AppCompatActivity {
                 statusText.setText("Rekam 'Halo Bokir' dulu.");
                 return;
             }
+            if (!Settings.canDrawOverlays(this)) {
+                statusText.setText("Aktifkan izin tampil di atas aplikasi lain, lalu kembali.");
+                Intent overlay = new Intent(
+                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:" + getPackageName())
+                );
+                startActivity(overlay);
+                return;
+            }
             if (ensureMicPermission()) {
                 Intent i = new Intent(this, WakeService.class);
                 ContextCompat.startForegroundService(this, i);
@@ -56,9 +68,21 @@ public class MainActivity extends AppCompatActivity {
         });
 
         if (hasTemplate()) {
-            statusText.setText("Pemicu tersimpan. Aktifkan Bokir.");
+            if (!Settings.canDrawOverlays(this)) {
+                statusText.setText("Pemicu tersimpan. Saat AKTIFKAN ditekan, izinkan tampil di atas aplikasi lain.");
+            } else {
+                statusText.setText("Pemicu tersimpan. Aktifkan Bokir.");
+            }
         } else {
             statusText.setText("Rekam ucapan 'Halo Bokir' sekali.");
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (hasTemplate() && Settings.canDrawOverlays(this)) {
+            statusText.setText("Izin background siap. Tekan AKTIFKAN BOKIR.");
         }
     }
 
@@ -66,7 +90,7 @@ public class MainActivity extends AppCompatActivity {
         try {
             Intent i = getPackageManager().getLaunchIntentForPackage("com.openai.chatgpt");
             if (i != null) {
-                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
                 startActivity(i);
                 statusText.setText("ChatGPT dibuka.");
             } else {
