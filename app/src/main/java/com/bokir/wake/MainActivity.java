@@ -29,6 +29,7 @@ public class MainActivity extends AppCompatActivity {
         statusText = findViewById(R.id.statusText);
         Button enrollButton = findViewById(R.id.enrollButton);
         Button startButton = findViewById(R.id.startButton);
+        Button testButton = findViewById(R.id.testButton);
         Button stopButton = findViewById(R.id.stopButton);
 
         enrollButton.setOnClickListener(v -> {
@@ -43,9 +44,11 @@ public class MainActivity extends AppCompatActivity {
             if (ensureMicPermission()) {
                 Intent i = new Intent(this, WakeService.class);
                 ContextCompat.startForegroundService(this, i);
-                statusText.setText("Bokir aktif. Anda boleh keluar dari aplikasi.");
+                statusText.setText("Bokir aktif. Tekan Home lalu ucapkan Halo Bokir.");
             }
         });
+
+        testButton.setOnClickListener(v -> openChatGPT());
 
         stopButton.setOnClickListener(v -> {
             stopService(new Intent(this, WakeService.class));
@@ -53,9 +56,24 @@ public class MainActivity extends AppCompatActivity {
         });
 
         if (hasTemplate()) {
-            statusText.setText("Pemicu sudah tersimpan. Tekan AKTIFKAN BOKIR.");
+            statusText.setText("Pemicu tersimpan. Aktifkan Bokir.");
         } else {
-            statusText.setText("Setup sekali: rekam ucapan 'Halo Bokir'.");
+            statusText.setText("Rekam ucapan 'Halo Bokir' sekali.");
+        }
+    }
+
+    private void openChatGPT() {
+        try {
+            Intent i = getPackageManager().getLaunchIntentForPackage("com.openai.chatgpt");
+            if (i != null) {
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(i);
+                statusText.setText("ChatGPT dibuka.");
+            } else {
+                statusText.setText("Aplikasi ChatGPT tidak ditemukan.");
+            }
+        } catch (Throwable t) {
+            statusText.setText("Gagal membuka ChatGPT.");
         }
     }
 
@@ -114,13 +132,13 @@ public class MainActivity extends AppCompatActivity {
 
                 float[] f = FeatureExtractor.extract(data, pos);
                 if (f == null) {
-                    post("Suara belum terbaca. Coba rekam lagi lebih jelas.");
+                    post("Suara belum terbaca. Rekam lagi lebih jelas.");
                     return;
                 }
 
                 SharedPreferences sp = getSharedPreferences("bokir", MODE_PRIVATE);
                 sp.edit().putString("template", FeatureExtractor.encode(f)).apply();
-                post("Tersimpan. Sekarang tekan AKTIFKAN BOKIR.");
+                post("Tersimpan. Tekan AKTIFKAN BOKIR.");
             } catch (SecurityException e) {
                 post("Izin mikrofon belum aktif.");
             } catch (Throwable t) {
@@ -146,7 +164,7 @@ public class MainActivity extends AppCompatActivity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQ_AUDIO && grantResults.length > 0
                 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-            statusText.setText("Izin mikrofon aktif. Tekan REKAM sekali.");
+            statusText.setText("Izin mikrofon aktif. Rekam pemicu.");
         } else {
             statusText.setText("Izin mikrofon ditolak.");
         }
