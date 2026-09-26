@@ -69,8 +69,8 @@ public class WakeService extends Service {
                     @Override public void onDone(String utteranceId) {
                         busy = false;
                         mode = Mode.FOLLOWUP_WAIT;
-                        followupDeadline = System.currentTimeMillis() + 8000;
-                        updateNotification("Lanjut bicara, atau diam 8 detik");
+                        followupDeadline = System.currentTimeMillis() + 5000;
+                        updateNotification("Lanjut bicara, atau diam 5 detik");
                     }
 
                     @Override public void onError(String utteranceId) {
