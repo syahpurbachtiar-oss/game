@@ -17,21 +17,35 @@
         android:id="@+id/statusText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Belum aktif"
+        android:text="Siap"
         android:textSize="18sp"
         android:gravity="center"
         android:layout_marginBottom="24dp"/>
 
     <Button
+        android:id="@+id/enrollButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="1. REKAM &quot;HALO BOKIR&quot;"/>
+
+    <Button
         android:id="@+id/startButton"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Mulai Dengarkan"/>
+        android:text="2. AKTIFKAN BOKIR"
+        android:layout_marginTop="12dp"/>
 
     <Button
         android:id="@+id/stopButton"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Berhenti"
+        android:text="BERHENTI"
         android:layout_marginTop="12dp"/>
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Setup sekali: rekam suara Anda mengucapkan “Halo Bokir”, lalu aktifkan. Setelah itu deteksi berjalan lokal tanpa SpeechRecognizer."
+        android:textSize="14sp"
+        android:layout_marginTop="24dp"/>
 </LinearLayout>
