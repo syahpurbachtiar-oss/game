@@ -15,18 +15,14 @@ public class WakeService extends Service {
     private volatile boolean running = false;
     private AudioRecord recorder;
     private float[] template;
+    private NotificationManager nm;
 
     @Override
     public void onCreate() {
         super.onCreate();
         createChannel();
-        Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("Bokir Wake aktif")
-                .setContentText("Menunggu: Halo Bokir")
-                .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-                .setOngoing(true)
-                .build();
-        startForeground(10, notification);
+        nm = getSystemService(NotificationManager.class);
+        startForeground(10, buildNotification("Menunggu: Halo Bokir"));
 
         template = FeatureExtractor.decode(
                 getSharedPreferences("bokir", MODE_PRIVATE).getString("template", null)
@@ -38,6 +34,21 @@ public class WakeService extends Service {
 
         running = true;
         new Thread(this::listenLoop).start();
+    }
+
+    private Notification buildNotification(String text) {
+        return new NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("Bokir Wake aktif")
+                .setContentText(text)
+                .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                .setOngoing(true)
+                .build();
+    }
+
+    private void updateNotification(String text) {
+        try {
+            if (nm != null) nm.notify(10, buildNotification(text));
+        } catch (Throwable ignored) {}
     }
 
     private void listenLoop() {
@@ -57,64 +68,77 @@ public class WakeService extends Service {
             );
 
             if (recorder.getState() != AudioRecord.STATE_INITIALIZED) {
+                updateNotification("Mikrofon gagal dibuka");
                 stopSelf();
                 return;
             }
 
             recorder.startRecording();
 
+            final int maxSamples = SAMPLE_RATE * 3;
+            short[] ring = new short[maxSamples];
+            int filled = 0;
             short[] frame = new short[320];
-            short[] speech = new short[SAMPLE_RATE * 3];
-            int speechPos = 0;
-            boolean inSpeech = false;
-            int silentFrames = 0;
-            float noise = 250f;
+            int frames = 0;
             long cooldownUntil = 0;
+            float lastShown = -1f;
 
             while (running) {
                 int n = recorder.read(frame, 0, frame.length);
                 if (n <= 0) continue;
 
-                double sum = 0;
-                for (int i = 0; i < n; i++) sum += (double)frame[i] * frame[i];
-                float rms = (float)Math.sqrt(sum / n);
-
-                if (!inSpeech) {
-                    noise = noise * 0.985f + rms * 0.015f;
-                    float gate = Math.max(500f, noise * 1.7f);
-                    if (rms > gate) {
-                        inSpeech = true;
-                        speechPos = 0;
-                        silentFrames = 0;
+                if (filled < maxSamples) {
+                    int copy = Math.min(n, maxSamples - filled);
+                    System.arraycopy(frame, 0, ring, filled, copy);
+                    filled += copy;
+                    if (copy < n) {
+                        int remain = n - copy;
+                        System.arraycopy(ring, remain, ring, 0, maxSamples - remain);
+                        System.arraycopy(frame, copy, ring, maxSamples - remain, remain);
+                        filled = maxSamples;
                     }
+                } else {
+                    System.arraycopy(ring, n, ring, 0, maxSamples - n);
+                    System.arraycopy(frame, 0, ring, maxSamples - n, n);
                 }
 
-                if (inSpeech) {
-                    int copy = Math.min(n, speech.length - speechPos);
-                    System.arraycopy(frame, 0, speech, speechPos, copy);
-                    speechPos += copy;
+                frames++;
+                if (frames % 8 != 0 || filled < SAMPLE_RATE) continue;
 
-                    float gate = Math.max(400f, noise * 1.25f);
-                    if (rms < gate) silentFrames++;
-                    else silentFrames = 0;
+                float best = -1f;
+                int[] windows = new int[] {
+                        SAMPLE_RATE,
+                        SAMPLE_RATE * 3 / 2,
+                        SAMPLE_RATE * 2,
+                        SAMPLE_RATE * 5 / 2,
+                        SAMPLE_RATE * 3
+                };
 
-                    boolean finished = silentFrames >= 12 || speechPos >= speech.length;
-                    if (finished) {
-                        if (speechPos > SAMPLE_RATE / 4 && System.currentTimeMillis() > cooldownUntil) {
-                            float[] f = FeatureExtractor.extract(speech, speechPos);
-                            float score = FeatureExtractor.cosine(template, f);
-                            if (score >= 0.78f) {
-                                cooldownUntil = System.currentTimeMillis() + 5000;
-                                openChatGPT();
-                            }
-                        }
-                        inSpeech = false;
-                        speechPos = 0;
-                        silentFrames = 0;
-                    }
+                for (int w : windows) {
+                    if (filled < w) continue;
+                    short[] segment = new short[w];
+                    System.arraycopy(ring, filled - w, segment, 0, w);
+                    float[] f = FeatureExtractor.extract(segment, w);
+                    float score = FeatureExtractor.cosine(template, f);
+                    if (score > best) best = score;
+                }
+
+                if (best > 0.55f && Math.abs(best - lastShown) > 0.03f) {
+                    updateNotification("Mendeteksi suara (" + Math.round(best * 100) + "%)");
+                    lastShown = best;
+                }
+
+                if (best >= 0.72f && System.currentTimeMillis() > cooldownUntil) {
+                    cooldownUntil = System.currentTimeMillis() + 6000;
+                    updateNotification("Halo Bokir terdeteksi");
+                    openChatGPT();
                 }
             }
+        } catch (SecurityException e) {
+            updateNotification("Izin mikrofon ditolak");
+            stopSelf();
         } catch (Throwable t) {
+            updateNotification("Listener berhenti: " + t.getClass().getSimpleName());
             stopSelf();
         } finally {
             try {
@@ -130,7 +154,7 @@ public class WakeService extends Service {
         try {
             Intent i = getPackageManager().getLaunchIntentForPackage("com.openai.chatgpt");
             if (i != null) {
-                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
                 startActivity(i);
             }
         } catch (Throwable ignored) {}
@@ -143,8 +167,8 @@ public class WakeService extends Service {
                     "Bokir Wake",
                     NotificationManager.IMPORTANCE_LOW
             );
-            NotificationManager nm = getSystemService(NotificationManager.class);
-            if (nm != null) nm.createNotificationChannel(c);
+            NotificationManager manager = getSystemService(NotificationManager.class);
+            if (manager != null) manager.createNotificationChannel(c);
         }
     }
 
