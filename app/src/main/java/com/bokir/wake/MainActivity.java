@@ -7,11 +7,9 @@ import android.content.pm.PackageManager;
 import android.media.AudioFormat;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
-import android.net.Uri;
-import android.os.Build;
 import android.os.Bundle;
-import android.provider.Settings;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -19,10 +17,20 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
+
 public class MainActivity extends AppCompatActivity {
     private static final int REQ_AUDIO = 1001;
     private static final int SAMPLE_RATE = 16000;
+
     private TextView statusText;
+    private EditText serverUrl;
+    private EditText tokenInput;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -30,75 +38,98 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         statusText = findViewById(R.id.statusText);
+        serverUrl = findViewById(R.id.serverUrl);
+        tokenInput = findViewById(R.id.tokenInput);
+
+        Button saveButton = findViewById(R.id.saveButton);
+        Button testServerButton = findViewById(R.id.testServerButton);
         Button enrollButton = findViewById(R.id.enrollButton);
         Button startButton = findViewById(R.id.startButton);
-        Button testButton = findViewById(R.id.testButton);
         Button stopButton = findViewById(R.id.stopButton);
+
+        SharedPreferences sp = getSharedPreferences("bokir", MODE_PRIVATE);
+        serverUrl.setText(sp.getString("server_url", ""));
+        tokenInput.setText(sp.getString("token", ""));
+
+        saveButton.setOnClickListener(v -> saveConfig());
+        testServerButton.setOnClickListener(v -> testServer());
 
         enrollButton.setOnClickListener(v -> {
             if (ensureMicPermission()) recordTemplate();
         });
 
         startButton.setOnClickListener(v -> {
+            saveConfig();
             if (!hasTemplate()) {
-                statusText.setText("Rekam 'Halo Bokir' dulu.");
+                statusText.setText("Rekam Halo Bokir dulu.");
                 return;
             }
-            if (!Settings.canDrawOverlays(this)) {
-                statusText.setText("Aktifkan izin tampil di atas aplikasi lain, lalu kembali.");
-                Intent overlay = new Intent(
-                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                        Uri.parse("package:" + getPackageName())
-                );
-                startActivity(overlay);
+            if (serverUrl.getText().toString().trim().isEmpty()) {
+                statusText.setText("Isi URL VPS dulu.");
                 return;
             }
             if (ensureMicPermission()) {
                 Intent i = new Intent(this, WakeService.class);
                 ContextCompat.startForegroundService(this, i);
-                statusText.setText("Bokir aktif. Tekan Home lalu ucapkan Halo Bokir.");
+                sp.edit().putBoolean("auto_start", true).apply();
+                statusText.setText("Bokir aktif. Sekarang boleh tekan Home / matikan layar.");
             }
         });
-
-        testButton.setOnClickListener(v -> openChatGPT());
 
         stopButton.setOnClickListener(v -> {
             stopService(new Intent(this, WakeService.class));
+            sp.edit().putBoolean("auto_start", false).apply();
             statusText.setText("Bokir berhenti.");
         });
 
-        if (hasTemplate()) {
-            if (!Settings.canDrawOverlays(this)) {
-                statusText.setText("Pemicu tersimpan. Saat AKTIFKAN ditekan, izinkan tampil di atas aplikasi lain.");
-            } else {
-                statusText.setText("Pemicu tersimpan. Aktifkan Bokir.");
-            }
-        } else {
-            statusText.setText("Rekam ucapan 'Halo Bokir' sekali.");
-        }
+        statusText.setText(hasTemplate()
+                ? "Wake word tersimpan. Isi VPS lalu aktifkan Bokir."
+                : "Rekam Halo Bokir sekali.");
     }
 
-    @Override
-    protected void onResume() {
-        super.onResume();
-        if (hasTemplate() && Settings.canDrawOverlays(this)) {
-            statusText.setText("Izin background siap. Tekan AKTIFKAN BOKIR.");
-        }
+    private void saveConfig() {
+        String url = serverUrl.getText().toString().trim();
+        while (url.endsWith("/")) url = url.substring(0, url.length() - 1);
+        getSharedPreferences("bokir", MODE_PRIVATE).edit()
+                .putString("server_url", url)
+                .putString("token", tokenInput.getText().toString().trim())
+                .apply();
+        statusText.setText("Konfigurasi VPS tersimpan.");
     }
 
-    private void openChatGPT() {
-        try {
-            Intent i = getPackageManager().getLaunchIntentForPackage("com.openai.chatgpt");
-            if (i != null) {
-                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-                startActivity(i);
-                statusText.setText("ChatGPT dibuka.");
-            } else {
-                statusText.setText("Aplikasi ChatGPT tidak ditemukan.");
-            }
-        } catch (Throwable t) {
-            statusText.setText("Gagal membuka ChatGPT.");
+    private void testServer() {
+        saveConfig();
+        final String base = serverUrl.getText().toString().trim().replaceAll("/+$", "");
+        if (base.isEmpty()) {
+            statusText.setText("Isi URL VPS dulu.");
+            return;
         }
+
+        statusText.setText("Menguji VPS...");
+        new Thread(() -> {
+            HttpURLConnection c = null;
+            try {
+                c = (HttpURLConnection) new URL(base + "/health").openConnection();
+                c.setConnectTimeout(5000);
+                c.setReadTimeout(5000);
+                c.setRequestMethod("GET");
+                int code = c.getResponseCode();
+                BufferedReader br = new BufferedReader(new InputStreamReader(
+                        code >= 200 && code < 300 ? c.getInputStream() : c.getErrorStream()
+                ));
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = br.readLine()) != null) sb.append(line);
+                JSONObject obj = new JSONObject(sb.toString());
+                post(obj.optBoolean("ok", false)
+                        ? "VPS CONNECT ✅"
+                        : "VPS menjawab tapi tidak OK.");
+            } catch (Throwable t) {
+                post("VPS belum bisa diakses: " + t.getClass().getSimpleName());
+            } finally {
+                if (c != null) c.disconnect();
+            }
+        }).start();
     }
 
     private boolean hasTemplate() {
@@ -118,13 +149,14 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void recordTemplate() {
-        statusText.setText("Ucapkan 'Halo Bokir' sekarang...");
+        statusText.setText("Ucapkan Halo Bokir sekarang...");
         new Thread(() -> {
             int min = AudioRecord.getMinBufferSize(
                     SAMPLE_RATE,
                     AudioFormat.CHANNEL_IN_MONO,
                     AudioFormat.ENCODING_PCM_16BIT
             );
+
             AudioRecord rec = null;
             try {
                 rec = new AudioRecord(
@@ -141,10 +173,11 @@ public class MainActivity extends AppCompatActivity {
                 }
 
                 short[] data = new short[SAMPLE_RATE * 3];
+                short[] buf = new short[1024];
                 int pos = 0;
+
                 rec.startRecording();
                 long until = System.currentTimeMillis() + 3000;
-                short[] buf = new short[1024];
 
                 while (System.currentTimeMillis() < until && pos < data.length) {
                     int n = rec.read(buf, 0, Math.min(buf.length, data.length - pos));
@@ -156,15 +189,15 @@ public class MainActivity extends AppCompatActivity {
 
                 float[] f = FeatureExtractor.extract(data, pos);
                 if (f == null) {
-                    post("Suara belum terbaca. Rekam lagi lebih jelas.");
+                    post("Suara belum terbaca. Rekam ulang lebih jelas.");
                     return;
                 }
 
-                SharedPreferences sp = getSharedPreferences("bokir", MODE_PRIVATE);
-                sp.edit().putString("template", FeatureExtractor.encode(f)).apply();
-                post("Tersimpan. Tekan AKTIFKAN BOKIR.");
-            } catch (SecurityException e) {
-                post("Izin mikrofon belum aktif.");
+                getSharedPreferences("bokir", MODE_PRIVATE).edit()
+                        .putString("template", FeatureExtractor.encode(f))
+                        .apply();
+
+                post("Halo Bokir tersimpan ✅");
             } catch (Throwable t) {
                 post("Gagal rekam: " + t.getClass().getSimpleName());
             } finally {
@@ -178,8 +211,8 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
-    private void post(String s) {
-        runOnUiThread(() -> statusText.setText(s));
+    private void post(String text) {
+        runOnUiThread(() -> statusText.setText(text));
     }
 
     @Override
@@ -188,7 +221,7 @@ public class MainActivity extends AppCompatActivity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQ_AUDIO && grantResults.length > 0
                 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-            statusText.setText("Izin mikrofon aktif. Rekam pemicu.");
+            statusText.setText("Izin mikrofon aktif.");
         } else {
             statusText.setText("Izin mikrofon ditolak.");
         }
