@@ -2,26 +2,24 @@ package com.bokir.wake;
 
 import android.Manifest;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.media.AudioFormat;
+import android.media.AudioRecord;
+import android.media.MediaRecorder;
 import android.os.Bundle;
-import android.speech.RecognitionListener;
-import android.speech.RecognizerIntent;
-import android.speech.SpeechRecognizer;
 import android.widget.Button;
 import android.widget.TextView;
+
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
-import java.util.ArrayList;
-import java.util.Locale;
-
 public class MainActivity extends AppCompatActivity {
     private static final int REQ_AUDIO = 1001;
+    private static final int SAMPLE_RATE = 16000;
     private TextView statusText;
-    private SpeechRecognizer recognizer;
-    private boolean launching = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -29,141 +27,117 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         statusText = findViewById(R.id.statusText);
+        Button enrollButton = findViewById(R.id.enrollButton);
         Button startButton = findViewById(R.id.startButton);
         Button stopButton = findViewById(R.id.stopButton);
 
-        startButton.setOnClickListener(v -> ensureStarted());
-        stopButton.setOnClickListener(v -> stopListening());
-
-        ensureStarted();
-    }
-
-    private void ensureStarted() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
-                != PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(
-                    this,
-                    new String[]{Manifest.permission.RECORD_AUDIO},
-                    REQ_AUDIO
-            );
-        } else {
-            safeStartListening();
-        }
-    }
-
-    private void safeStartListening() {
-        try {
-            startListening();
-        } catch (Throwable t) {
-            statusText.setText("Error mulai dengar: " + t.getClass().getSimpleName());
-        }
-    }
-
-    private void startListening() {
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            statusText.setText("SpeechRecognizer tidak tersedia");
-            return;
-        }
-
-        stopRecognizerOnly();
-
-        recognizer = SpeechRecognizer.createSpeechRecognizer(this);
-        recognizer.setRecognitionListener(new RecognitionListener() {
-            @Override public void onReadyForSpeech(Bundle params) {
-                statusText.setText("Mendengarkan... ucapkan: Halo Bokir");
-            }
-            @Override public void onBeginningOfSpeech() {
-                statusText.setText("Suara terdeteksi...");
-            }
-            @Override public void onRmsChanged(float rmsdB) {}
-            @Override public void onBufferReceived(byte[] buffer) {}
-            @Override public void onEndOfSpeech() {
-                statusText.setText("Memproses ucapan...");
-            }
-            @Override public void onError(int error) {
-                statusText.setText("Error suara #" + error + " — mencoba lagi");
-                statusText.postDelayed(() -> safeStartListening(), 800);
-            }
-            @Override public void onResults(Bundle results) {
-                checkResults(results);
-                statusText.postDelayed(() -> safeStartListening(), 500);
-            }
-            @Override public void onPartialResults(Bundle partialResults) {
-                checkResults(partialResults);
-            }
-            @Override public void onEvent(int eventType, Bundle params) {}
+        enrollButton.setOnClickListener(v -> {
+            if (ensureMicPermission()) recordTemplate();
         });
 
-        Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "id-ID");
-        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "id-ID");
-        intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
-        intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5);
-        recognizer.startListening(intent);
-    }
-
-    private void checkResults(Bundle bundle) {
-        ArrayList<String> list = bundle.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-        if (list == null || list.isEmpty()) return;
-
-        String heard = list.get(0);
-        statusText.setText("Terdengar: " + heard);
-
-        if (launching) return;
-        for (String s : list) {
-            String t = s.toLowerCase(Locale.ROOT).trim();
-            if (t.contains("bokir") || t.contains("bogir") || t.contains("bukir")) {
-                launching = true;
-                statusText.setText("Bokir terdeteksi — membuka ChatGPT...");
-                launchAssistant();
-                statusText.postDelayed(() -> launching = false, 3000);
-                break;
+        startButton.setOnClickListener(v -> {
+            if (!hasTemplate()) {
+                statusText.setText("Rekam 'Halo Bokir' dulu.");
+                return;
             }
+            if (ensureMicPermission()) {
+                Intent i = new Intent(this, WakeService.class);
+                ContextCompat.startForegroundService(this, i);
+                statusText.setText("Bokir aktif. Anda boleh keluar dari aplikasi.");
+            }
+        });
+
+        stopButton.setOnClickListener(v -> {
+            stopService(new Intent(this, WakeService.class));
+            statusText.setText("Bokir berhenti.");
+        });
+
+        if (hasTemplate()) {
+            statusText.setText("Pemicu sudah tersimpan. Tekan AKTIFKAN BOKIR.");
+        } else {
+            statusText.setText("Setup sekali: rekam ucapan 'Halo Bokir'.");
         }
     }
 
-    private void launchAssistant() {
-        try {
-            Intent assistant = new Intent(Intent.ACTION_ASSIST);
-            assistant.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(assistant);
-            return;
-        } catch (Throwable ignored) {}
+    private boolean hasTemplate() {
+        return getSharedPreferences("bokir", MODE_PRIVATE).contains("template");
+    }
 
-        try {
-            Intent i = getPackageManager().getLaunchIntentForPackage("com.openai.chatgpt");
-            if (i != null) {
-                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                startActivity(i);
-            } else {
-                statusText.setText("ChatGPT tidak ditemukan");
+    private boolean ensureMicPermission() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+                == PackageManager.PERMISSION_GRANTED) return true;
+
+        ActivityCompat.requestPermissions(
+                this,
+                new String[]{Manifest.permission.RECORD_AUDIO},
+                REQ_AUDIO
+        );
+        return false;
+    }
+
+    private void recordTemplate() {
+        statusText.setText("Ucapkan 'Halo Bokir' sekarang...");
+        new Thread(() -> {
+            int min = AudioRecord.getMinBufferSize(
+                    SAMPLE_RATE,
+                    AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT
+            );
+            AudioRecord rec = null;
+            try {
+                rec = new AudioRecord(
+                        MediaRecorder.AudioSource.MIC,
+                        SAMPLE_RATE,
+                        AudioFormat.CHANNEL_IN_MONO,
+                        AudioFormat.ENCODING_PCM_16BIT,
+                        Math.max(min * 2, SAMPLE_RATE * 2)
+                );
+
+                if (rec.getState() != AudioRecord.STATE_INITIALIZED) {
+                    post("Mikrofon gagal dibuka.");
+                    return;
+                }
+
+                short[] data = new short[SAMPLE_RATE * 3];
+                int pos = 0;
+                rec.startRecording();
+                long until = System.currentTimeMillis() + 3000;
+                short[] buf = new short[1024];
+
+                while (System.currentTimeMillis() < until && pos < data.length) {
+                    int n = rec.read(buf, 0, Math.min(buf.length, data.length - pos));
+                    if (n > 0) {
+                        System.arraycopy(buf, 0, data, pos, n);
+                        pos += n;
+                    }
+                }
+
+                float[] f = FeatureExtractor.extract(data, pos);
+                if (f == null) {
+                    post("Suara belum terbaca. Coba rekam lagi lebih jelas.");
+                    return;
+                }
+
+                SharedPreferences sp = getSharedPreferences("bokir", MODE_PRIVATE);
+                sp.edit().putString("template", FeatureExtractor.encode(f)).apply();
+                post("Tersimpan. Sekarang tekan AKTIFKAN BOKIR.");
+            } catch (SecurityException e) {
+                post("Izin mikrofon belum aktif.");
+            } catch (Throwable t) {
+                post("Gagal rekam: " + t.getClass().getSimpleName());
+            } finally {
+                try {
+                    if (rec != null) {
+                        rec.stop();
+                        rec.release();
+                    }
+                } catch (Throwable ignored) {}
             }
-        } catch (Throwable t) {
-            statusText.setText("Gagal membuka ChatGPT");
-        }
+        }).start();
     }
 
-    private void stopRecognizerOnly() {
-        try {
-            if (recognizer != null) {
-                recognizer.cancel();
-                recognizer.destroy();
-                recognizer = null;
-            }
-        } catch (Throwable ignored) {}
-    }
-
-    private void stopListening() {
-        stopRecognizerOnly();
-        statusText.setText("Berhenti");
-    }
-
-    @Override
-    protected void onDestroy() {
-        stopRecognizerOnly();
-        super.onDestroy();
+    private void post(String s) {
+        runOnUiThread(() -> statusText.setText(s));
     }
 
     @Override
@@ -172,9 +146,9 @@ public class MainActivity extends AppCompatActivity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQ_AUDIO && grantResults.length > 0
                 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-            safeStartListening();
+            statusText.setText("Izin mikrofon aktif. Tekan REKAM sekali.");
         } else {
-            statusText.setText("Izin mikrofon ditolak");
+            statusText.setText("Izin mikrofon ditolak.");
         }
     }
 }
