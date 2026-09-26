@@ -2,129 +2,134 @@ package com.bokir.wake;
 
 import android.app.*;
 import android.content.*;
+import android.media.AudioFormat;
+import android.media.AudioRecord;
+import android.media.MediaRecorder;
 import android.os.Build;
 import android.os.IBinder;
-import android.speech.*;
 import androidx.core.app.NotificationCompat;
 
-import java.util.ArrayList;
-import java.util.Locale;
+import java.io.ByteArrayOutputStream;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 
 public class WakeService extends Service {
-    private static final String CHANNEL_ID = "bokir_wake_channel";
-    private SpeechRecognizer recognizer;
-    private boolean launching = false;
+    private static final int SAMPLE_RATE = 16000;
+    private static final String CHANNEL_ID = "bokir_local";
+    private volatile boolean running = false;
+    private AudioRecord recorder;
+    private float[] template;
 
     @Override
     public void onCreate() {
         super.onCreate();
         createChannel();
-
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("Bokir Wake aktif")
-                .setContentText("Menunggu: Halo Bokir")
+                .setContentText("Menunggu ucapan pemicu")
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .setOngoing(true)
                 .build();
+        startForeground(10, notification);
 
-        startForeground(1, notification);
-        sendStatus("Service aktif. Menyiapkan pendengar...");
-        new android.os.Handler(getMainLooper()).postDelayed(this::safeStartListening, 400);
-    }
-
-    private void sendStatus(String msg) {
-        Intent i = new Intent("com.bokir.wake.STATUS");
-        i.setPackage(getPackageName());
-        i.putExtra("msg", msg);
-        sendBroadcast(i);
-    }
-
-    private void safeStartListening() {
-        try {
-            startListening();
-        } catch (Throwable t) {
-            sendStatus("Error mulai dengar: " + t.getClass().getSimpleName());
-            scheduleRestart(1500);
-        }
-    }
-
-    private void startListening() {
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            sendStatus("SpeechRecognizer tidak tersedia");
-            scheduleRestart(2000);
+        template = FeatureExtractor.decode(
+                getSharedPreferences("bokir", MODE_PRIVATE).getString("template", null)
+        );
+        if (template == null) {
+            stopSelf();
             return;
         }
 
-        if (recognizer != null) {
-            try { recognizer.destroy(); } catch (Throwable ignored) {}
-            recognizer = null;
-        }
-
-        recognizer = SpeechRecognizer.createSpeechRecognizer(this);
-        recognizer.setRecognitionListener(new RecognitionListener() {
-            @Override public void onReadyForSpeech(android.os.Bundle params) {
-                sendStatus("Mendengarkan... ucapkan: Halo Bokir");
-            }
-            @Override public void onBeginningOfSpeech() {
-                sendStatus("Suara terdeteksi...");
-            }
-            @Override public void onRmsChanged(float rmsdB) {}
-            @Override public void onBufferReceived(byte[] buffer) {}
-            @Override public void onEndOfSpeech() {
-                sendStatus("Memproses ucapan...");
-            }
-            @Override public void onError(int error) {
-                sendStatus("Error suara #" + error + " — mencoba lagi");
-                scheduleRestart(1000);
-            }
-
-            @Override
-            public void onResults(android.os.Bundle results) {
-                checkResults(results, false);
-                scheduleRestart(700);
-            }
-
-            @Override public void onPartialResults(android.os.Bundle partialResults) {
-                checkResults(partialResults, true);
-            }
-
-            @Override public void onEvent(int eventType, android.os.Bundle params) {}
-        });
-
-        Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "id-ID");
-        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "id-ID");
-        intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
-        intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5);
-        intent.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, getPackageName());
-        recognizer.startListening(intent);
+        running = true;
+        new Thread(this::listenLoop).start();
     }
 
-    private void checkResults(android.os.Bundle bundle, boolean partial) {
-        ArrayList<String> list = bundle.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-        if (list == null || list.isEmpty()) return;
+    private void listenLoop() {
+        int min = AudioRecord.getMinBufferSize(
+                SAMPLE_RATE,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT
+        );
 
-        String heard = list.get(0);
-        sendStatus((partial ? "Terdengar: " : "Hasil: ") + heard);
+        try {
+            recorder = new AudioRecord(
+                    MediaRecorder.AudioSource.MIC,
+                    SAMPLE_RATE,
+                    AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT,
+                    Math.max(min * 2, SAMPLE_RATE * 2)
+            );
 
-        if (launching) return;
-
-        for (String s : list) {
-            String t = s.toLowerCase(Locale.ROOT).trim();
-            if (t.contains("bokir") || t.contains("bogir") || t.contains("bukir")) {
-                launching = true;
-                sendStatus("Bokir terdeteksi — membuka ChatGPT...");
-                launchAssistant();
-                new android.os.Handler(getMainLooper()).postDelayed(() -> launching = false, 3000);
-                break;
+            if (recorder.getState() != AudioRecord.STATE_INITIALIZED) {
+                stopSelf();
+                return;
             }
-        }
-    }
 
-    private void scheduleRestart(long delayMs) {
-        new android.os.Handler(getMainLooper()).postDelayed(this::safeStartListening, delayMs);
+            recorder.startRecording();
+
+            short[] frame = new short[320];
+            short[] speech = new short[SAMPLE_RATE * 3];
+            int speechPos = 0;
+            boolean inSpeech = false;
+            int silentFrames = 0;
+            float noise = 300f;
+            long cooldownUntil = 0;
+
+            while (running) {
+                int n = recorder.read(frame, 0, frame.length);
+                if (n <= 0) continue;
+
+                double sum = 0;
+                for (int i = 0; i < n; i++) sum += (double)frame[i] * frame[i];
+                float rms = (float)Math.sqrt(sum / n);
+
+                if (!inSpeech) {
+                    noise = noise * 0.98f + rms * 0.02f;
+                    float gate = Math.max(700f, noise * 2.2f);
+                    if (rms > gate) {
+                        inSpeech = true;
+                        speechPos = 0;
+                        silentFrames = 0;
+                    }
+                }
+
+                if (inSpeech) {
+                    int copy = Math.min(n, speech.length - speechPos);
+                    System.arraycopy(frame, 0, speech, speechPos, copy);
+                    speechPos += copy;
+
+                    float gate = Math.max(500f, noise * 1.5f);
+                    if (rms < gate) silentFrames++;
+                    else silentFrames = 0;
+
+                    boolean finished = silentFrames >= 18 || speechPos >= speech.length;
+                    if (finished) {
+                        if (speechPos > SAMPLE_RATE / 3 && System.currentTimeMillis() > cooldownUntil) {
+                            float[] f = FeatureExtractor.extract(speech, speechPos);
+                            float score = FeatureExtractor.cosine(template, f);
+                            if (score >= 0.90f) {
+                                cooldownUntil = System.currentTimeMillis() + 5000;
+                                launchAssistant();
+                            }
+                        }
+                        inSpeech = false;
+                        speechPos = 0;
+                        silentFrames = 0;
+                    }
+                }
+            }
+        } catch (SecurityException e) {
+            stopSelf();
+        } catch (Throwable t) {
+            stopSelf();
+        } finally {
+            try {
+                if (recorder != null) {
+                    recorder.stop();
+                    recorder.release();
+                }
+            } catch (Throwable ignored) {}
+        }
     }
 
     private void launchAssistant() {
@@ -142,32 +147,26 @@ public class WakeService extends Service {
                 if (i != null) {
                     i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                     startActivity(i);
-                    started = true;
                 }
             } catch (Throwable ignored) {}
         }
-
-        if (!started) sendStatus("ChatGPT tidak berhasil dibuka");
     }
 
     private void createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationChannel channel =
-                    new NotificationChannel(
-                            CHANNEL_ID,
-                            "Bokir Wake",
-                            NotificationManager.IMPORTANCE_LOW
-                    );
+            NotificationChannel c = new NotificationChannel(
+                    CHANNEL_ID,
+                    "Bokir Wake",
+                    NotificationManager.IMPORTANCE_LOW
+            );
             NotificationManager nm = getSystemService(NotificationManager.class);
-            if (nm != null) nm.createNotificationChannel(channel);
+            if (nm != null) nm.createNotificationChannel(c);
         }
     }
 
     @Override
     public void onDestroy() {
-        try {
-            if (recognizer != null) recognizer.destroy();
-        } catch (Throwable ignored) {}
+        running = false;
         super.onDestroy();
     }
 
