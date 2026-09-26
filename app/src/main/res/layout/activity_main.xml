@@ -1,51 +1,89 @@
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:padding="24dp"
-    android:gravity="center_horizontal">
+    android:layout_height="match_parent">
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Bokir Wake"
-        android:textSize="28sp"
-        android:textStyle="bold"
-        android:layout_marginBottom="16dp"/>
-
-    <TextView
-        android:id="@+id/statusText"
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Siap"
-        android:textSize="18sp"
-        android:gravity="center"
-        android:layout_marginBottom="24dp"/>
+        android:orientation="vertical"
+        android:padding="24dp">
 
-    <Button
-        android:id="@+id/enrollButton"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="1. REKAM &quot;HALO BOKIR&quot;"/>
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Bokir Voice"
+            android:textSize="28sp"
+            android:textStyle="bold"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginBottom="12dp"/>
 
-    <Button
-        android:id="@+id/startButton"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="2. AKTIFKAN BOKIR"
-        android:layout_marginTop="12dp"/>
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Setup VPS lalu rekam wake word."
+            android:textSize="17sp"
+            android:gravity="center"
+            android:layout_marginBottom="18dp"/>
 
-    <Button
-        android:id="@+id/testButton"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="TEST BUKA CHATGPT"
-        android:layout_marginTop="12dp"/>
+        <EditText
+            android:id="@+id/serverUrl"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="http://IP-VPS:8787"
+            android:inputType="textUri"
+            android:singleLine="true"/>
 
-    <Button
-        android:id="@+id/stopButton"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="BERHENTI"
-        android:layout_marginTop="12dp"/>
-</LinearLayout>
+        <EditText
+            android:id="@+id/tokenInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="BOKIR_TOKEN"
+            android:inputType="textPassword"
+            android:singleLine="true"
+            android:layout_marginTop="8dp"/>
+
+        <Button
+            android:id="@+id/saveButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="SIMPAN VPS"
+            android:layout_marginTop="12dp"/>
+
+        <Button
+            android:id="@+id/testServerButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="TEST VPS"
+            android:layout_marginTop="8dp"/>
+
+        <Button
+            android:id="@+id/enrollButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="1. REKAM &quot;HALO BOKIR&quot;"
+            android:layout_marginTop="18dp"/>
+
+        <Button
+            android:id="@+id/startButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="2. AKTIFKAN BOKIR"
+            android:layout_marginTop="8dp"/>
+
+        <Button
+            android:id="@+id/stopButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="BERHENTI"
+            android:layout_marginTop="8dp"/>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Flow: Halo Bokir → tanya → diam sebentar → AI menjawab lewat speaker. Setelah jawaban, Bokir menunggu pertanyaan lanjutan beberapa detik tanpa perlu wake word lagi."
+            android:textSize="14sp"
+            android:layout_marginTop="18dp"/>
+
+    </LinearLayout>
+</ScrollView>
