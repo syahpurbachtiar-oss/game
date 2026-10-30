@@ -1,44 +1,33 @@
 # Kota Kita — Bisnis Properti
 
-Game papan properti orisinal yang berjalan di browser dan responsif untuk HP maupun PC.
-
-**Live path:** `https://syahpurbachtiar-oss.github.io/game/monopoli-online/`
+Game papan bisnis properti orisinal, responsif untuk HP dan PC.
 
 ## Fitur
 
-- Mode lokal 2–4 pemain, termasuk AI komputer.
-- Mode online hingga 4 pemain manusia dengan kode room enam karakter.
-- Papan 40 petak, dadu, gaji, pembelian properti, sewa, rumah/hotel, gadai, kartu, pajak, penjara, dan kondisi menang.
-- Progress game lokal disimpan di browser.
-- UI responsif, tanpa proses build atau API berbayar.
-- Firebase Realtime Database untuk sinkronisasi online antarperangkat.
+- Mode lokal 2–4 pemain (pemain manusia + AI komputer).
+- Mode online hingga 4 pemain lewat kode room.
+- Papan 40 petak, dadu, gaji, pembelian properti, sewa, rumah/hotel, gadai, kartu, pajak, penjara, dan kebangkrutan.
+- Simpan progres permainan lokal di browser.
+- UI responsif. Tidak perlu build tool atau API server sendiri.
 
-## Cara main lokal
+## Online tanpa konfigurasi untuk pemain
 
-Buka live link, atur 2–4 pemain, pilih manusia atau AI komputer, lalu klik **Mulai Bermain**. Progres lokal tersimpan di browser yang sama.
+Koneksi online memakai konfigurasi Firebase Firestore yang sudah ditanam langsung di `index.html`, dengan pola yang sama seperti game HAY Gaple milik pemilik repository. Pemain tidak perlu membuat proyek Firebase, memasukkan API key, login, atau mengatur database.
 
-## Aktifkan online room (perlu konfigurasi Firebase satu kali)
+- Host klik **Buat Room**, lalu bagikan kode enam karakter.
+- Pemain lain memasukkan kode tersebut dan klik **Gabung**.
+- Host klik **Mulai Permainan** setelah minimal dua orang bergabung.
+- Maksimal empat pemain manusia per room.
 
-GitHub Pages hanya meng-host file statis. Online room memakai Firebase Realtime Database. Untuk mengaktifkannya:
+Data room Monopoli menggunakan dokumen dengan prefix `MONO_` di koleksi Firestore `rooms`, sehingga tidak bertabrakan dengan dokumen room Gaple yang menggunakan ID biasa.
 
-1. Buka [Firebase Console](https://console.firebase.google.com/) dan buat project.
-2. Tambahkan aplikasi web di Project settings → General, lalu salin Web App config.
-3. Di Authentication → Sign-in method, aktifkan **Anonymous**.
-4. Buat **Realtime Database** pada Build → Realtime Database dan salin Database URL.
-5. Pada Realtime Database → Rules, salin isi file `database.rules.json` dari repository ini dan tekan **Publish**.
-6. Buka game, perluas **Pengaturan Firebase**, isi API Key, Auth Domain, Database URL, Project ID, dan App ID; tekan **Simpan & Hubungkan**.
-7. Lakukan langkah 6 juga pada perangkat teman menggunakan konfigurasi Firebase yang sama.
-8. Host klik **Buat Room** dan bagikan kode/link; teman memasukkan kode lalu klik **Gabung**. Host dapat memulai permainan setelah minimal dua pemain bergabung.
+## File
 
-Firebase Web API key bukan kredensial admin. Tetap gunakan rules di atas dan jangan menyimpan service-account key di aplikasi web. Rules ini cocok untuk bermain kasual bersama teman; pemain yang sudah masuk room dapat memodifikasi state game, jadi ini bukan sistem anti-cheat atau game berhadiah uang asli.
+- `index.html` — seluruh UI dan logika permainan.
+- `database.rules.json` — contoh rules untuk instalasi Realtime Database lama; tidak digunakan oleh versi online Firestore saat ini.
 
-## Files
+## Catatan teknis
 
-- `index.html` — UI dan logika game.
-- `database.rules.json` — contoh rules Firebase Realtime Database.
+Mode online menggunakan database Firebase yang sudah dipakai aplikasi Gaple. Karena koneksi ditanam langsung di HTML, siapa pun yang membuka game dapat menggunakan konfigurasi Firebase yang sama. Aturan akses aktual mengikuti Firestore Rules pada proyek tersebut. Permainan dirancang untuk main kasual bersama teman, bukan kompetisi berhadiah atau transaksi uang asli.
 
-## Batasan
-
-- Mode online membutuhkan project Firebase milik operator game; tanpa konfigurasi tersebut, mode lokal tetap bisa dimainkan.
-- Permainan online saat ini mengandalkan klien browser untuk logika game, sehingga tidak cocok untuk kompetisi berhadiah atau data sensitif.
-- Tidak memerlukan akun permanen; autentikasi Firebase anonymous dibuat otomatis.
+Game ini tidak berafiliasi dengan merek board game lain.
